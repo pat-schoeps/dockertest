@@ -1,0 +1,444 @@
+import { Module } from '../core/Module.js'
+import { Logger } from '../utils/Logger.js'
+import { Chunk } from './Chunk.js'
+import { Block } from './Block.js'
+import { Entity } from './Entity.js'
+
+/**
+ * World manager for handling chunks and world data
+ */
+export class WorldManager extends Module {
+  constructor(engine) {
+    super('WorldManager', engine)
+    this.logger = new Logger('WorldManager')
+    
+    this.worldId = 'default'
+    this.chunks = new Map()
+    this.activeChunks = new Set()
+    
+    // Player/camera position for chunk loading
+    this.viewX = 0
+    this.viewY = 0
+    this.viewDistance = 3 // Chunks to load around view position
+    
+    // Entity management
+    this.globalEntities = new Map() // Entities that span multiple chunks
+    this.playerEntity = null
+  }
+
+  async onInitialize() {
+    // Listen for camera updates
+    this.engine.eventBus.on('camera:moved', ({ x, y }) => {
+      this.updateView(x, y)
+    })
+    
+    // Listen for input events
+    this.engine.eventBus.on('input:mousedown', ({ worldX, worldY, button }) => {
+      if (button === 0) { // Left click
+        this.handleClick(worldX, worldY)
+      }
+    })
+    
+    this.logger.info('World manager initialized')
+  }
+
+  /**
+   * Create a new world
+   * @param {string} worldId - World identifier
+   * @param {number} centerX - Center X position
+   * @param {number} centerY - Center Y position
+   */
+  createWorld(worldId = 'default', centerX = 0, centerY = 0) {
+    this.worldId = worldId
+    this.chunks.clear()
+    this.activeChunks.clear()
+    this.globalEntities.clear()
+    
+    this.viewX = centerX
+    this.viewY = centerY
+    
+    // Create a single chunk with a simple 4x4 grid
+    this.createSimpleGrid()
+    
+    this.logger.info(`Created world: ${worldId}`)
+    this.engine.eventBus.emit('world:created', { worldId })
+  }
+
+  /**
+   * Create a simple 4x4 grid for testing
+   */
+  createSimpleGrid() {
+    // Create a single chunk at origin
+    const chunk = new Chunk(0, 0, this.worldId)
+    
+    // Clear any existing blocks first (in case of re-initialization)
+    chunk.blocks.clear()
+    
+    // Create a 4x4 grid of blocks (don't mark as dirty during initial creation)
+    for (let x = 0; x < 4; x++) {
+      for (let y = 0; y < 4; y++) {
+        const block = new Block(x, y, 0, 'grass', {
+          color: '#00ff88'
+        })
+        chunk.setBlock(x, y, 0, block, false) // false = don't mark as dirty
+      }
+    }
+    
+    // Add the chunk (will replace any existing chunk with same ID)
+    const chunkId = chunk.id
+    this.chunks.set(chunkId, chunk)
+    this.activeChunks.clear()
+    this.activeChunks.add(chunkId)
+    
+    this.logger.info(`Created simple 4x4 grid. Chunk ID: ${chunkId}, Blocks: ${chunk.blocks.size}`)
+    
+    // Only log in development for debugging
+    if (this.chunks.size > 1) {
+      console.warn('Multiple chunks detected - this should not happen with simple grid')
+    }
+  }
+
+  /**
+   * Update view position and load/unload chunks
+   * @param {number} x - View X position
+   * @param {number} y - View Y position
+   */
+  updateView(x, y) {
+    this.viewX = x
+    this.viewY = y
+    // Disabled automatic chunk loading for simple grid
+    // this.updateActiveChunks()
+  }
+
+  /**
+   * Update active chunks based on view position
+   */
+  updateActiveChunks() {
+    const chunkX = Math.floor(this.viewX / Chunk.SIZE)
+    const chunkY = Math.floor(this.viewY / Chunk.SIZE)
+    
+    const newActiveChunks = new Set()
+    
+    // Determine which chunks should be active
+    for (let dx = -this.viewDistance; dx <= this.viewDistance; dx++) {
+      for (let dy = -this.viewDistance; dy <= this.viewDistance; dy++) {
+        const cx = chunkX + dx
+        const cy = chunkY + dy
+        const chunkId = `${this.worldId}_${cx}_${cy}`
+        
+        newActiveChunks.add(chunkId)
+        
+        // Load chunk if not already loaded
+        if (!this.chunks.has(chunkId)) {
+          this.loadChunk(cx, cy)
+        }
+      }
+    }
+    
+    // Unload chunks that are no longer active
+    for (const chunkId of this.activeChunks) {
+      if (!newActiveChunks.has(chunkId)) {
+        this.unloadChunk(chunkId)
+      }
+    }
+    
+    this.activeChunks = newActiveChunks
+  }
+
+  /**
+   * Load or generate a chunk
+   * @param {number} chunkX - Chunk X coordinate
+   * @param {number} chunkY - Chunk Y coordinate
+   */
+  loadChunk(chunkX, chunkY) {
+    const chunkId = `${this.worldId}_${chunkX}_${chunkY}`
+    
+    // Check if chunk exists in storage (would be loaded from server/cache)
+    // For now, generate procedurally
+    const chunk = new Chunk(chunkX, chunkY, this.worldId)
+    chunk.generateTerrain()
+    
+    this.chunks.set(chunkId, chunk)
+    
+    this.logger.debug(`Loaded chunk: ${chunkId}`)
+    this.engine.eventBus.emit('chunk:loaded', { chunkId, chunk })
+  }
+
+  /**
+   * Unload a chunk
+   * @param {string} chunkId - Chunk identifier
+   */
+  unloadChunk(chunkId) {
+    const chunk = this.chunks.get(chunkId)
+    if (!chunk) return
+    
+    // Save chunk if dirty (would save to server/cache)
+    if (chunk.dirty) {
+      this.saveChunk(chunk)
+    }
+    
+    this.chunks.delete(chunkId)
+    
+    this.logger.debug(`Unloaded chunk: ${chunkId}`)
+    this.engine.eventBus.emit('chunk:unloaded', { chunkId })
+  }
+
+  /**
+   * Save a chunk (placeholder for server integration)
+   * @param {Chunk} chunk - Chunk to save
+   */
+  saveChunk(chunk) {
+    // In production, this would send to server or save to cache
+    const data = chunk.toJSON()
+    
+    // For now, just mark as clean
+    chunk.markClean()
+    
+    this.logger.debug(`Saved chunk: ${chunk.id}`)
+    this.engine.eventBus.emit('chunk:saved', { chunkId: chunk.id, data })
+  }
+
+  /**
+   * Get chunk at world position
+   * @param {number} worldX - World X position
+   * @param {number} worldY - World Y position
+   * @returns {Chunk|null}
+   */
+  getChunkAt(worldX, worldY) {
+    const chunkX = Math.floor(worldX / Chunk.SIZE)
+    const chunkY = Math.floor(worldY / Chunk.SIZE)
+    const chunkId = `${this.worldId}_${chunkX}_${chunkY}`
+    
+    return this.chunks.get(chunkId) || null
+  }
+
+  /**
+   * Get block at world position
+   * @param {number} worldX - World X position
+   * @param {number} worldY - World Y position
+   * @param {number} z - Z layer
+   * @returns {Block|null}
+   */
+  getBlockAt(worldX, worldY, z = 0) {
+    const chunk = this.getChunkAt(worldX, worldY)
+    if (!chunk) return null
+    
+    const local = chunk.worldToLocal(worldX, worldY)
+    return chunk.getBlock(local.x, local.y, z)
+  }
+
+  /**
+   * Set block at world position
+   * @param {number} worldX - World X position
+   * @param {number} worldY - World Y position
+   * @param {number} z - Z layer
+   * @param {Block} block - Block to set
+   */
+  setBlockAt(worldX, worldY, z, block) {
+    const chunk = this.getChunkAt(worldX, worldY)
+    if (!chunk) return
+    
+    const local = chunk.worldToLocal(worldX, worldY)
+    chunk.setBlock(local.x, local.y, z, block)
+    
+    this.engine.eventBus.emit('block:changed', {
+      worldX,
+      worldY,
+      z,
+      block,
+      chunkId: chunk.id
+    })
+  }
+
+  /**
+   * Add entity to world
+   * @param {Entity} entity - Entity to add
+   */
+  addEntity(entity) {
+    const chunk = this.getChunkAt(entity.x, entity.y)
+    if (chunk) {
+      chunk.addEntity(entity)
+      
+      this.engine.eventBus.emit('entity:added', {
+        entity,
+        chunkId: chunk.id
+      })
+    } else {
+      // Add to global entities if chunk not loaded
+      this.globalEntities.set(entity.id, entity)
+    }
+  }
+
+  /**
+   * Remove entity from world
+   * @param {string} entityId - Entity ID
+   */
+  removeEntity(entityId) {
+    // Check all active chunks
+    for (const chunk of this.chunks.values()) {
+      if (chunk.getEntity(entityId)) {
+        chunk.removeEntity(entityId)
+        
+        this.engine.eventBus.emit('entity:removed', {
+          entityId,
+          chunkId: chunk.id
+        })
+        return
+      }
+    }
+    
+    // Check global entities
+    this.globalEntities.delete(entityId)
+  }
+
+  /**
+   * Get entities in radius
+   * @param {number} centerX - Center X position
+   * @param {number} centerY - Center Y position
+   * @param {number} radius - Search radius
+   * @returns {Entity[]}
+   */
+  getEntitiesInRadius(centerX, centerY, radius) {
+    const entities = []
+    const radiusSq = radius * radius
+    
+    for (const chunk of this.chunks.values()) {
+      for (const entity of chunk.getEntities()) {
+        const dx = entity.x - centerX
+        const dy = entity.y - centerY
+        const distSq = dx * dx + dy * dy
+        
+        if (distSq <= radiusSq) {
+          entities.push(entity)
+        }
+      }
+    }
+    
+    return entities
+  }
+
+  /**
+   * Handle click in world
+   * @param {number} worldX - World X position
+   * @param {number} worldY - World Y position
+   */
+  handleClick(worldX, worldY) {
+    // Check for entity clicks
+    const entities = this.getEntitiesInRadius(worldX, worldY, 1)
+    
+    for (const entity of entities) {
+      if (entity.interactable) {
+        this.engine.eventBus.emit('entity:clicked', {
+          entity,
+          worldX,
+          worldY
+        })
+        
+        this.logger.info(`Clicked entity: ${entity.id} (${entity.type})`)
+        return
+      }
+    }
+    
+    // Check for block clicks
+    const block = this.getBlockAt(Math.floor(worldX), Math.floor(worldY))
+    if (block && block.interactable) {
+      this.engine.eventBus.emit('block:clicked', {
+        block,
+        worldX: Math.floor(worldX),
+        worldY: Math.floor(worldY)
+      })
+      
+      this.logger.info(`Clicked block: ${block.type} at (${Math.floor(worldX)}, ${Math.floor(worldY)})`)
+    }
+  }
+
+  /**
+   * Set player entity
+   * @param {Entity} entity - Player entity
+   */
+  setPlayerEntity(entity) {
+    this.playerEntity = entity
+    this.addEntity(entity)
+    
+    // Center view on player
+    this.updateView(entity.x, entity.y)
+    
+    this.engine.eventBus.emit('player:spawned', { entity })
+  }
+
+  /**
+   * Update world state
+   * @param {number} deltaTime - Time since last update
+   */
+  onUpdate(deltaTime) {
+    // Update all entities in active chunks
+    for (const chunkId of this.activeChunks) {
+      const chunk = this.chunks.get(chunkId)
+      if (!chunk) continue
+      
+      for (const entity of chunk.getEntities()) {
+        if (entity.animated) {
+          entity.updateAnimation(deltaTime)
+        }
+        if (entity.movable) {
+          entity.updatePhysics(deltaTime)
+        }
+      }
+    }
+    
+    // Player position tracking disabled for simple grid
+    // if (this.playerEntity) {
+    //   this.updateView(this.playerEntity.x, this.playerEntity.y)
+    // }
+  }
+
+  /**
+   * Get all active chunks
+   * @returns {Map<string, Chunk>}
+   */
+  getActiveChunks() {
+    const active = new Map()
+    for (const chunkId of this.activeChunks) {
+      const chunk = this.chunks.get(chunkId)
+      if (chunk) {
+        active.set(chunkId, chunk)
+      }
+    }
+    return active
+  }
+
+  /**
+   * Serialize world state
+   * @returns {Object}
+   */
+  toJSON() {
+    const chunks = []
+    for (const chunk of this.chunks.values()) {
+      chunks.push(chunk.toJSON())
+    }
+    
+    return {
+      worldId: this.worldId,
+      viewX: this.viewX,
+      viewY: this.viewY,
+      chunks,
+      playerEntity: this.playerEntity ? this.playerEntity.toJSON() : null
+    }
+  }
+
+  async onDestroy() {
+    // Save all dirty chunks
+    for (const chunk of this.chunks.values()) {
+      if (chunk.dirty) {
+        this.saveChunk(chunk)
+      }
+    }
+    
+    this.chunks.clear()
+    this.activeChunks.clear()
+    this.globalEntities.clear()
+    this.playerEntity = null
+    
+    this.logger.info('WorldManager destroyed and cleaned up')
+  }
+}
