@@ -1,5 +1,6 @@
 import { Module } from '../core/Module.js'
 import { Logger } from '../utils/Logger.js'
+import { GameConfig } from '../config/GameConfig.js'
 
 /**
  * Base renderer class for canvas rendering
@@ -20,7 +21,7 @@ export class Renderer extends Module {
       zoom: 1
     }
     
-    this.backgroundColor = '#2a1a4a'
+    this.backgroundColor = GameConfig.rendering.backgroundColor
     this.showDebug = false
     this.renderStats = {
       drawCalls: 0,

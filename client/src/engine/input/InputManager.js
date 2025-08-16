@@ -35,6 +35,7 @@ export class InputManager extends Module {
       mousedown: this.handleMouseDown.bind(this),
       mouseup: this.handleMouseUp.bind(this),
       mousemove: this.handleMouseMove.bind(this),
+      mouseleave: this.handleMouseLeave.bind(this),
       wheel: this.handleWheel.bind(this),
       contextmenu: this.handleContextMenu.bind(this)
     }
@@ -78,6 +79,7 @@ export class InputManager extends Module {
       this.canvas.addEventListener('mousedown', this.boundHandlers.mousedown)
       this.canvas.addEventListener('mouseup', this.boundHandlers.mouseup)
       this.canvas.addEventListener('mousemove', this.boundHandlers.mousemove)
+      this.canvas.addEventListener('mouseleave', this.boundHandlers.mouseleave)
       this.canvas.addEventListener('wheel', this.boundHandlers.wheel, { passive: false })
       this.canvas.addEventListener('contextmenu', this.boundHandlers.contextmenu)
     }
@@ -94,6 +96,7 @@ export class InputManager extends Module {
       this.canvas.removeEventListener('mousedown', this.boundHandlers.mousedown)
       this.canvas.removeEventListener('mouseup', this.boundHandlers.mouseup)
       this.canvas.removeEventListener('mousemove', this.boundHandlers.mousemove)
+      this.canvas.removeEventListener('mouseleave', this.boundHandlers.mouseleave)
       this.canvas.removeEventListener('wheel', this.boundHandlers.wheel)
       this.canvas.removeEventListener('contextmenu', this.boundHandlers.contextmenu)
     }
@@ -192,9 +195,10 @@ export class InputManager extends Module {
     this.mouse.worldX = position.worldX
     this.mouse.worldY = position.worldY
     
+    
     this.engine.eventBus.emit('input:mousemove', {
-      x: position.x,
-      y: position.y,
+      screenX: position.x,
+      screenY: position.y,
       worldX: position.worldX,
       worldY: position.worldY,
       deltaX,
@@ -203,6 +207,14 @@ export class InputManager extends Module {
     })
   }
 
+  /**
+   * Handle mouse leave event
+   * @param {MouseEvent} event
+   */
+  handleMouseLeave(event) {
+    this.engine.eventBus.emit('input:mouseleave', { event })
+  }
+  
   /**
    * Handle wheel event
    * @param {WheelEvent} event
@@ -234,21 +246,28 @@ export class InputManager extends Module {
    */
   getMousePosition(event) {
     if (!this.canvas) {
-      return { 
-        x: event.clientX, 
-        y: event.clientY,
-        worldX: event.clientX,
-        worldY: event.clientY
-      }
+      return { x: 0, y: 0, worldX: 0, worldY: 0 }
     }
     
     const rect = this.canvas.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
     
-    // Calculate world position (will be updated by camera/renderer)
-    const worldX = x
-    const worldY = y
+    // Get the renderer to convert to world coordinates
+    const renderer = this.engine.getModule('IsometricRenderer') || this.engine.getModule('Renderer')
+    let worldX = x
+    let worldY = y
+    
+    if (renderer && renderer.screenToWorld) {
+      const worldPos = renderer.screenToWorld(x, y)
+      worldX = worldPos.x
+      worldY = worldPos.y
+    } else {
+      console.warn('No renderer available for world coordinate conversion')
+      // Fallback if renderer not available
+      worldX = x
+      worldY = y
+    }
     
     return { x, y, worldX, worldY }
   }
@@ -308,10 +327,10 @@ export class InputManager extends Module {
   }
 
   /**
-   * Get mouse position
+   * Get current cached mouse position
    * @returns {{x: number, y: number, worldX: number, worldY: number}}
    */
-  getMousePosition() {
+  getCurrentMousePosition() {
     return {
       x: this.mouse.x,
       y: this.mouse.y,

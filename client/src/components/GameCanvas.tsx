@@ -4,7 +4,9 @@ import { AssetManager } from '../engine/assets/AssetManager.js'
 import { InputManager } from '../engine/input/InputManager.js'
 import { IsometricRenderer } from '../engine/rendering/IsometricRenderer.js'
 import { WorldManager } from '../engine/world/WorldManager.js'
+import { StateManager } from '../engine/state/StateManager.js'
 import { Entity } from '../engine/world/Entity.js'
+import { GameConfig } from '../engine/config/GameConfig.js'
 
 export const GameCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -35,11 +37,13 @@ export const GameCanvas = () => {
       const inputManager = new InputManager(engine, canvasRef.current!)
       const renderer = new IsometricRenderer(engine, canvasRef.current!)
       const worldManager = new WorldManager(engine)
+      const stateManager = new StateManager(engine)
 
       engine.registerModule(assetManager)
       engine.registerModule(inputManager)
       engine.registerModule(renderer)
       engine.registerModule(worldManager)
+      engine.registerModule(stateManager)
 
       // Store engine reference
       engineRef.current = engine
@@ -60,10 +64,10 @@ export const GameCanvas = () => {
           return
         }
         
-        // Set up camera BEFORE creating world - center on the grid
-        let cameraX = 1.5  // Center of 4x4 grid (0-3 range, so center is 1.5)
-        let cameraY = 1.5
-        let cameraZoom = 1.2  // Zoom out a bit to see the whole grid
+        // Set up camera BEFORE creating world using config values
+        let cameraX = GameConfig.camera.initialX
+        let cameraY = GameConfig.camera.initialY
+        let cameraZoom = GameConfig.camera.initialZoom
         
         renderer.setCamera(cameraX, cameraY)
         renderer.setZoom(cameraZoom)
@@ -74,12 +78,12 @@ export const GameCanvas = () => {
           return
         }
         
-        // Create initial world with simple 4x4 grid
-        worldManager.createWorld('default', 1.5, 1.5)
+        // Create initial world with single tile
+        worldManager.createWorld(GameConfig.world.defaultWorldId, cameraX, cameraY)
 
         // Handle keyboard input for camera movement
         engine.eventBus.on('input:keydown', ({ key }) => {
-          const moveSpeed = 0.5
+          const moveSpeed = GameConfig.camera.moveSpeed
           
           switch(key) {
             case 'KeyW':
@@ -99,11 +103,11 @@ export const GameCanvas = () => {
               cameraX += moveSpeed
               break
             case 'KeyQ':
-              cameraZoom = Math.max(0.5, cameraZoom - 0.1)
+              cameraZoom = Math.max(GameConfig.camera.minZoom, cameraZoom - GameConfig.camera.zoomSpeed)
               renderer.setZoom(cameraZoom)
               break
             case 'KeyE':
-              cameraZoom = Math.min(2, cameraZoom + 0.1)
+              cameraZoom = Math.min(GameConfig.camera.maxZoom, cameraZoom + GameConfig.camera.zoomSpeed)
               renderer.setZoom(cameraZoom)
               break
             case 'KeyG':
@@ -123,10 +127,15 @@ export const GameCanvas = () => {
 
         // Handle mouse wheel for zoom
         engine.eventBus.on('input:wheel', ({ deltaY }) => {
-          cameraZoom = Math.max(0.5, Math.min(2, cameraZoom - deltaY * 0.001))
+          cameraZoom = Math.max(GameConfig.camera.minZoom, Math.min(GameConfig.camera.maxZoom, cameraZoom - deltaY * GameConfig.camera.wheelZoomSpeed))
           renderer.setZoom(cameraZoom)
         })
 
+        // Handle tile hover events
+        engine.eventBus.on('tile:hover', ({ current, previous }) => {
+          renderer.setHoveredTile(current)
+        })
+        
         // Handle entity clicks
         engine.eventBus.on('entity:clicked', ({ entity }) => {
           console.log('Entity clicked:', entity)
@@ -212,7 +221,7 @@ export const GameCanvas = () => {
       position: 'relative',
       width: '100vw', 
       height: '100vh',
-      backgroundColor: '#2a1a4a',
+      backgroundColor: GameConfig.rendering.backgroundColor,
       overflow: 'hidden'
     }}>
       <canvas
@@ -225,7 +234,7 @@ export const GameCanvas = () => {
       />
       
       {/* Debug overlay */}
-      <div style={{
+      {GameConfig.debug.showDebugInfo && <div style={{
         position: 'absolute',
         top: 10,
         left: 10,
@@ -242,10 +251,10 @@ export const GameCanvas = () => {
         <div>Entities: {debugInfo.entities}</div>
         <div>Camera: ({debugInfo.camera.x.toFixed(1)}, {debugInfo.camera.y.toFixed(1)})</div>
         <div>Zoom: {debugInfo.zoom.toFixed(2)}x</div>
-      </div>
+      </div>}
       
       {/* Controls help */}
-      <div style={{
+      {GameConfig.debug.showControls && <div style={{
         position: 'absolute',
         bottom: 10,
         left: 10,
@@ -265,7 +274,7 @@ export const GameCanvas = () => {
         <div>B - Toggle chunk borders</div>
         <div>H - Toggle debug info</div>
         <div>Click - Interact with entities</div>
-      </div>
+      </div>}
     </div>
   )
 }

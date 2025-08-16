@@ -1,5 +1,6 @@
 import { Renderer } from './Renderer.js'
 import { Logger } from '../utils/Logger.js'
+import { GameConfig, ColorUtils } from '../config/GameConfig.js'
 
 /**
  * Isometric renderer for rendering world chunks
@@ -9,18 +10,21 @@ export class IsometricRenderer extends Renderer {
     super(engine, canvas)
     this.logger = new Logger('IsometricRenderer')
     
-    // Isometric configuration
-    this.tileWidth = 64
-    this.tileHeight = 32
-    this.tileDepth = 20 // Height per Z level
+    // Isometric configuration from config
+    this.tileWidth = GameConfig.rendering.tileWidth
+    this.tileHeight = GameConfig.rendering.tileHeight
+    this.tileDepth = GameConfig.rendering.tileDepth
     
-    // Rendering options
-    this.showGrid = false
-    this.showChunkBorders = false
-    this.enableGlow = true
+    // Rendering options from config
+    this.showGrid = GameConfig.rendering.showGridByDefault
+    this.showChunkBorders = GameConfig.rendering.showChunkBorders
+    this.enableGlow = GameConfig.rendering.enableGlow
     
     // Visible chunks cache
     this.visibleChunks = new Set()
+    
+    // Hover state
+    this.hoveredTile = null
   }
 
   /**
@@ -76,10 +80,7 @@ export class IsometricRenderer extends Renderer {
       return depthA - depthB
     })
     
-    // Debug: Log how many objects we're rendering
-    if (renderables.length !== 16) {
-      console.warn(`Expected 16 blocks, but rendering ${renderables.length} objects`)
-    }
+    // Dynamic rendering - no fixed expectations about block count
     
     // Render all objects
     for (const renderable of renderables) {
@@ -93,6 +94,11 @@ export class IsometricRenderer extends Renderer {
     // Render overlays
     if (this.showGrid) {
       this.renderGrid(visibleChunks)
+    }
+    
+    // Render hover highlight
+    if (this.hoveredTile) {
+      this.renderHoverHighlight(this.hoveredTile)
     }
     
     if (this.showChunkBorders) {
@@ -138,6 +144,27 @@ export class IsometricRenderer extends Renderer {
     const worldY = (isoY / (this.tileHeight / 2) - isoX / (this.tileWidth / 2)) / 2
     return { x: worldX, y: worldY }
   }
+  
+  /**
+   * Convert screen coordinates to world coordinates
+   * @param {number} screenX - Screen X position
+   * @param {number} screenY - Screen Y position
+   * @returns {{x: number, y: number}}
+   */
+  screenToWorld(screenX, screenY) {
+    // Convert screen to isometric coordinates (reverse the camera transform)
+    const isoX = (screenX - this.width / 2) / this.camera.zoom
+    const isoY = (screenY - this.height / 2) / this.camera.zoom
+    
+    // Convert isometric to world
+    const world = this.isometricToWorld(isoX, isoY)
+    
+    // Add camera offset
+    return {
+      x: world.x + this.camera.x,
+      y: world.y + this.camera.y
+    }
+  }
 
   /**
    * Render a block
@@ -160,14 +187,17 @@ export class IsometricRenderer extends Renderer {
     this.ctx.translate(screenX, screenY)
     this.ctx.scale(this.camera.zoom, this.camera.zoom)
     
-    // Draw block as isometric tile (now at origin due to translation)
-    this.drawIsometricTile(
+    // Get block height (default to 1 if not specified)
+    const blockHeight = block.properties?.height || 1
+    
+    // Draw block as 3D isometric cube
+    this.drawIsometricBox(
       0,
       0,
       this.tileWidth,
       this.tileHeight,
-      block.color,
-      block.z * this.tileDepth
+      blockHeight * this.tileDepth, // Convert height to pixels (reduced by half)
+      block.color
     )
     
     this.ctx.restore()
@@ -231,6 +261,80 @@ export class IsometricRenderer extends Renderer {
   }
 
   /**
+   * Draw an isometric box (3D block)
+   * @param {number} x - Center X position
+   * @param {number} y - Center Y position
+   * @param {number} width - Box width
+   * @param {number} height - Box height (diamond shape)
+   * @param {number} depth - Box depth/height
+   * @param {string} color - Fill color
+   */
+  drawIsometricBox(x, y, width, height, depth, color) {
+    this.ctx.save()
+    
+    // Calculate vertices
+    const top = y - depth
+    const bottom = y
+    
+    // Top face (brightest)
+    this.ctx.fillStyle = color
+    this.ctx.beginPath()
+    this.ctx.moveTo(x, top)
+    this.ctx.lineTo(x + width / 2, top + height / 2)
+    this.ctx.lineTo(x, top + height)
+    this.ctx.lineTo(x - width / 2, top + height / 2)
+    this.ctx.closePath()
+    this.ctx.fill()
+    
+    // Add subtle outline to top
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'
+    this.ctx.lineWidth = 0.5
+    this.ctx.stroke()
+    
+    // Left face (darkest)
+    this.ctx.fillStyle = ColorUtils.darken(color, 0.6)
+    this.ctx.beginPath()
+    this.ctx.moveTo(x - width / 2, top + height / 2)
+    this.ctx.lineTo(x - width / 2, bottom + height / 2)
+    this.ctx.lineTo(x, bottom + height)
+    this.ctx.lineTo(x, top + height)
+    this.ctx.closePath()
+    this.ctx.fill()
+    
+    // Add edge line
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)'
+    this.ctx.lineWidth = 0.5
+    this.ctx.stroke()
+    
+    // Right face (medium dark)
+    this.ctx.fillStyle = ColorUtils.darken(color, 0.75)
+    this.ctx.beginPath()
+    this.ctx.moveTo(x, top + height)
+    this.ctx.lineTo(x, bottom + height)
+    this.ctx.lineTo(x + width / 2, bottom + height / 2)
+    this.ctx.lineTo(x + width / 2, top + height / 2)
+    this.ctx.closePath()
+    this.ctx.fill()
+    
+    // Add edge line
+    this.ctx.stroke()
+    
+    // Draw edges for better definition
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)'
+    this.ctx.lineWidth = 1
+    this.ctx.beginPath()
+    // Top edges
+    this.ctx.moveTo(x, top)
+    this.ctx.lineTo(x + width / 2, top + height / 2)
+    this.ctx.lineTo(x, top + height)
+    this.ctx.lineTo(x - width / 2, top + height / 2)
+    this.ctx.closePath()
+    this.ctx.stroke()
+    
+    this.ctx.restore()
+  }
+
+  /**
    * Draw an isometric tile
    * @param {number} x - Center X position
    * @param {number} y - Center Y position
@@ -259,7 +363,7 @@ export class IsometricRenderer extends Renderer {
     
     // Left face (darker) - only if depth > 0
     if (depth > 0) {
-      this.ctx.fillStyle = this.darkenColor(color, 0.7)
+      this.ctx.fillStyle = ColorUtils.darken(color, 0.7)
       this.ctx.beginPath()
       this.ctx.moveTo(x - width / 2, y + height / 2 - depth)
       this.ctx.lineTo(x - width / 2, y + height / 2)
@@ -269,7 +373,7 @@ export class IsometricRenderer extends Renderer {
       this.ctx.fill()
       
       // Right face (darker)
-      this.ctx.fillStyle = this.darkenColor(color, 0.8)
+      this.ctx.fillStyle = ColorUtils.darken(color, 0.8)
       this.ctx.beginPath()
       this.ctx.moveTo(x, y + height - depth)
       this.ctx.lineTo(x, y + height)
@@ -305,7 +409,7 @@ export class IsometricRenderer extends Renderer {
     this.ctx.fill()
     
     // Left face
-    this.ctx.fillStyle = this.darkenColor(color, 0.7)
+    this.ctx.fillStyle = ColorUtils.darken(color, 0.7)
     this.ctx.beginPath()
     this.ctx.moveTo(x - width / 2, y - depth + height / 2)
     this.ctx.lineTo(x - width / 2, y + height / 2)
@@ -315,7 +419,7 @@ export class IsometricRenderer extends Renderer {
     this.ctx.fill()
     
     // Right face
-    this.ctx.fillStyle = this.darkenColor(color, 0.85)
+    this.ctx.fillStyle = ColorUtils.darken(color, 0.85)
     this.ctx.beginPath()
     this.ctx.moveTo(x, y - depth + height)
     this.ctx.lineTo(x, y + height)
@@ -364,32 +468,45 @@ export class IsometricRenderer extends Renderer {
    */
   renderGrid(chunks) {
     this.ctx.save()
-    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'
-    this.ctx.lineWidth = 1 / this.camera.zoom
+    this.ctx.strokeStyle = GameConfig.grid.color
+    this.ctx.lineWidth = GameConfig.grid.lineWidth / this.camera.zoom
     
-    for (const chunk of chunks) {
-      for (let x = 0; x < 16; x++) {
-        for (let y = 0; y < 16; y++) {
-          const worldPos = chunk.localToWorld(x, y)
-          
-          // Get position relative to camera
-          const relX = worldPos.x - this.camera.x
-          const relY = worldPos.y - this.camera.y
-          const iso = this.worldToIsometric(relX, relY)
-          
-          // Apply zoom and center on screen
-          const screenX = iso.x * this.camera.zoom + this.width / 2
-          const screenY = iso.y * this.camera.zoom + this.height / 2
-          
-          // Draw grid cell
-          this.ctx.beginPath()
-          this.ctx.moveTo(screenX, screenY)
-          this.ctx.lineTo(screenX + this.tileWidth / 2 * this.camera.zoom, screenY + this.tileHeight / 2 * this.camera.zoom)
-          this.ctx.lineTo(screenX, screenY + this.tileHeight * this.camera.zoom)
-          this.ctx.lineTo(screenX - this.tileWidth / 2 * this.camera.zoom, screenY + this.tileHeight / 2 * this.camera.zoom)
-          this.ctx.closePath()
-          this.ctx.stroke()
+    // Calculate visible grid range based on screen size and camera
+    const screenRadius = Math.max(this.width, this.height) / (this.camera.zoom * Math.min(this.tileWidth, this.tileHeight))
+    const gridExtent = Math.ceil(screenRadius) + GameConfig.grid.extent
+    
+    // Center the grid around camera position
+    const cameraGridX = Math.floor(this.camera.x)
+    const cameraGridY = Math.floor(this.camera.y)
+    
+    // Render grid extending in all directions from camera
+    for (let x = cameraGridX - gridExtent; x <= cameraGridX + gridExtent; x++) {
+      for (let y = cameraGridY - gridExtent; y <= cameraGridY + gridExtent; y++) {
+        // Get position relative to camera
+        const relX = x - this.camera.x
+        const relY = y - this.camera.y
+        const iso = this.worldToIsometric(relX, relY)
+        
+        // Apply zoom and center on screen
+        const screenX = iso.x * this.camera.zoom + this.width / 2
+        const screenY = iso.y * this.camera.zoom + this.height / 2
+        
+        // Skip tiles that are off screen
+        if (screenX < -this.tileWidth * this.camera.zoom || 
+            screenX > this.width + this.tileWidth * this.camera.zoom ||
+            screenY < -this.tileHeight * this.camera.zoom || 
+            screenY > this.height + this.tileHeight * this.camera.zoom) {
+          continue
         }
+        
+        // Draw grid cell
+        this.ctx.beginPath()
+        this.ctx.moveTo(screenX, screenY)
+        this.ctx.lineTo(screenX + this.tileWidth / 2 * this.camera.zoom, screenY + this.tileHeight / 2 * this.camera.zoom)
+        this.ctx.lineTo(screenX, screenY + this.tileHeight * this.camera.zoom)
+        this.ctx.lineTo(screenX - this.tileWidth / 2 * this.camera.zoom, screenY + this.tileHeight / 2 * this.camera.zoom)
+        this.ctx.closePath()
+        this.ctx.stroke()
       }
     }
     
@@ -436,27 +553,6 @@ export class IsometricRenderer extends Renderer {
     this.ctx.restore()
   }
 
-  /**
-   * Darken a color
-   * @param {string} color - Hex color
-   * @param {number} factor - Darken factor (0-1)
-   * @returns {string}
-   */
-  darkenColor(color, factor) {
-    // Convert hex to RGB
-    const hex = color.replace('#', '')
-    const r = parseInt(hex.substr(0, 2), 16)
-    const g = parseInt(hex.substr(2, 2), 16)
-    const b = parseInt(hex.substr(4, 2), 16)
-    
-    // Darken
-    const newR = Math.floor(r * factor)
-    const newG = Math.floor(g * factor)
-    const newB = Math.floor(b * factor)
-    
-    // Convert back to hex
-    return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`
-  }
 
   /**
    * Toggle grid display
@@ -477,5 +573,47 @@ export class IsometricRenderer extends Renderer {
    */
   toggleGlow() {
     this.enableGlow = !this.enableGlow
+  }
+  
+  /**
+   * Set the hovered tile
+   * @param {Object|null} tile - Tile coordinates {x, y} or null
+   */
+  setHoveredTile(tile) {
+    this.hoveredTile = tile
+  }
+  
+  /**
+   * Render hover highlight for a tile
+   * @param {Object} tile - Tile coordinates {x, y}
+   */
+  renderHoverHighlight(tile) {
+    this.ctx.save()
+    
+    // Get position relative to camera
+    const relX = tile.x - this.camera.x
+    const relY = tile.y - this.camera.y
+    const iso = this.worldToIsometric(relX, relY)
+    
+    // Apply zoom and center on screen
+    const screenX = iso.x * this.camera.zoom + this.width / 2
+    const screenY = iso.y * this.camera.zoom + this.height / 2
+    
+    // Set highlight style - much more visible for debugging
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'
+    this.ctx.lineWidth = 3 / this.camera.zoom
+    
+    // Draw filled isometric tile
+    this.ctx.beginPath()
+    this.ctx.moveTo(screenX, screenY)
+    this.ctx.lineTo(screenX + this.tileWidth / 2 * this.camera.zoom, screenY + this.tileHeight / 2 * this.camera.zoom)
+    this.ctx.lineTo(screenX, screenY + this.tileHeight * this.camera.zoom)
+    this.ctx.lineTo(screenX - this.tileWidth / 2 * this.camera.zoom, screenY + this.tileHeight / 2 * this.camera.zoom)
+    this.ctx.closePath()
+    this.ctx.fill()
+    this.ctx.stroke()
+    
+    this.ctx.restore()
   }
 }

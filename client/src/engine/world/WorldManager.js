@@ -3,6 +3,7 @@ import { Logger } from '../utils/Logger.js'
 import { Chunk } from './Chunk.js'
 import { Block } from './Block.js'
 import { Entity } from './Entity.js'
+import { GameConfig } from '../config/GameConfig.js'
 
 /**
  * World manager for handling chunks and world data
@@ -39,6 +40,16 @@ export class WorldManager extends Module {
       }
     })
     
+    // Listen for block placement requests from state manager
+    this.engine.eventBus.on('tile:requestPlace', ({ x, y, z }) => {
+      this.placeBlock(x, y, z)
+    })
+    
+    // Listen for block removal requests from state manager
+    this.engine.eventBus.on('tile:requestDelete', ({ x, y, z }) => {
+      this.removeBlock(x, y, z)
+    })
+    
     this.logger.info('World manager initialized')
   }
 
@@ -57,32 +68,24 @@ export class WorldManager extends Module {
     this.viewX = centerX
     this.viewY = centerY
     
-    // Create a single chunk with a simple 4x4 grid
-    this.createSimpleGrid()
+    // Create a single chunk with initial content
+    this.createInitialContent()
     
     this.logger.info(`Created world: ${worldId}`)
     this.engine.eventBus.emit('world:created', { worldId })
   }
 
   /**
-   * Create a simple 4x4 grid for testing
+   * Create initial content for the world
    */
-  createSimpleGrid() {
-    // Create a single chunk at origin
+  createInitialContent() {
+    // Create a single empty chunk at origin
     const chunk = new Chunk(0, 0, this.worldId)
     
     // Clear any existing blocks first (in case of re-initialization)
     chunk.blocks.clear()
     
-    // Create a 4x4 grid of blocks (don't mark as dirty during initial creation)
-    for (let x = 0; x < 4; x++) {
-      for (let y = 0; y < 4; y++) {
-        const block = new Block(x, y, 0, 'grass', {
-          color: '#00ff88'
-        })
-        chunk.setBlock(x, y, 0, block, false) // false = don't mark as dirty
-      }
-    }
+    // No blocks added - just an empty chunk for the grid
     
     // Add the chunk (will replace any existing chunk with same ID)
     const chunkId = chunk.id
@@ -90,7 +93,7 @@ export class WorldManager extends Module {
     this.activeChunks.clear()
     this.activeChunks.add(chunkId)
     
-    this.logger.info(`Created simple 4x4 grid. Chunk ID: ${chunkId}, Blocks: ${chunk.blocks.size}`)
+    this.logger.info(`Created empty world. Chunk ID: ${chunkId}, Blocks: ${chunk.blocks.size}`)
     
     // Only log in development for debugging
     if (this.chunks.size > 1) {
@@ -248,6 +251,70 @@ export class WorldManager extends Module {
       block,
       chunkId: chunk.id
     })
+  }
+
+  /**
+   * Place a new block at the specified position
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} z - Z layer (default 0)
+   */
+  placeBlock(x, y, z = 0) {
+    // Check if block already exists at this position
+    if (this.getBlockAt(x, y, z)) {
+      this.logger.warn(`Block already exists at (${x}, ${y}, ${z})`)
+      return
+    }
+    
+    // Create a new block with default properties
+    const block = new Block(x, y, z, GameConfig.block.defaultType, {
+      color: GameConfig.block.defaultColor,
+      height: GameConfig.block.defaultHeight
+    })
+    
+    // Place the block
+    this.setBlockAt(x, y, z, block)
+    
+    // Emit block added event for state management
+    this.engine.eventBus.emit('block:added', {
+      block,
+      worldX: x,
+      worldY: y,
+      z
+    })
+    
+    this.logger.info(`Placed block at (${x}, ${y}, ${z})`)
+  }
+
+  /**
+   * Remove a block at the specified position
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} z - Z layer (default 0)
+   */
+  removeBlock(x, y, z = 0) {
+    const block = this.getBlockAt(x, y, z)
+    if (!block) {
+      this.logger.warn(`No block found at (${x}, ${y}, ${z})`)
+      return
+    }
+    
+    // Remove the block from the chunk
+    const chunk = this.getChunkAt(x, y)
+    if (chunk) {
+      const local = chunk.worldToLocal(x, y)
+      chunk.removeBlock(local.x, local.y, z)
+    }
+    
+    // Emit block removed event for state management
+    this.engine.eventBus.emit('block:removed', {
+      block,
+      worldX: x,
+      worldY: y,
+      z
+    })
+    
+    this.logger.info(`Removed block at (${x}, ${y}, ${z})`)
   }
 
   /**
