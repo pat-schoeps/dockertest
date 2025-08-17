@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Hover Issue</title>
+</head>
+<body>
+    <h1>Debug Steps for Hover Issue</h1>
+    <ol>
+        <li>Open <a href="http://localhost:3001/test-game" target="_blank">http://localhost:3001/test-game</a></li>
+        <li>Open browser console (F12)</li>
+        <li>Place 2-3 blocks at the same position by clicking repeatedly</li>
+        <li>Move mouse over empty areas - should see console message: "🔍 setHoveredTile called with: {x: X, y: Y}"</li>
+        <li>Move mouse over the stacked blocks - should see the same message</li>
+        <li>If hover works, should see: "🎯 Hover at (X, Y): highestZ=Z, targetZ=Z+1"</li>
+        <li>If drawing works, should see: "🎨 Drawing hover at screen (X, Y) with targetZ=Z+1"</li>
+    </ol>
+    
+    <h2>Debugging Checklist:</h2>
+    <ul>
+        <li>❌ No "🔍 setHoveredTile" messages → Hover events not working</li>
+        <li>❌ "setHoveredTile" shows but no "🎯 Hover" → renderHoverHighlight not called</li>
+        <li>❌ "🎯 Hover" shows but no "🎨 Drawing" → Problem in drawing logic</li>
+        <li>❌ All messages show but no visual → Canvas drawing issue</li>
+    </ul>
+</body>
+</html>

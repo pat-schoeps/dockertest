@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manual Hover Test</title>
+</head>
+<body>
+    <h1>Manual Hover Test Instructions</h1>
+    <ol>
+        <li>Open <a href="http://localhost:3001/test-game" target="_blank">http://localhost:3001/test-game</a></li>
+        <li>Click on the canvas twice at the same position to stack 2 blocks</li>
+        <li>Move your mouse over the stacked blocks - you should see a <strong>yellow hover outline</strong> at the top of the stack</li>
+        <li>Move your mouse over an empty area - you should see a <strong>yellow hover outline</strong> at ground level</li>
+        <li>The hover outline should be clearly visible and yellow instead of the old white</li>
+    </ol>
+    
+    <h2>Expected Behavior:</h2>
+    <ul>
+        <li>✅ <strong>Yellow hover outline</strong> appears when hovering over tiles</li>
+        <li>✅ Outline appears <strong>elevated</strong> when hovering over stacked blocks</li>
+        <li>✅ Outline appears at <strong>ground level</strong> when hovering over empty tiles</li>
+        <li>✅ Outline follows mouse movement smoothly</li>
+    </ul>
+    
+    <h2>If it's not working:</h2>
+    <ul>
+        <li>❌ No hover outline appears - hover events not working</li>
+        <li>❌ Outline is white instead of yellow - color change didn't apply</li>
+        <li>❌ Outline always at ground level - height calculation not working</li>
+    </ul>
+</body>
+</html>

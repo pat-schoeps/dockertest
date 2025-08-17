@@ -235,13 +235,27 @@ The client includes a custom-built isometric 3D game engine with modular archite
 
 ### Configuration
 
+**IMPORTANT: Always use GameConfig for units and dimensions!**
+
+All game engine modules should pull values from `client/src/engine/config/GameConfig.js` instead of hardcoding values. This centralized configuration ensures consistency and makes adjustments easier.
+
 Key settings in `client/src/engine/config/GameConfig.js`:
 - `block.defaultHeight`: 2.0 (height of each block)
+- `block.defaultColor`: '#00ff88' (default block color)
 - `rendering.tileWidth`: 64 pixels
 - `rendering.tileHeight`: 32 pixels  
 - `rendering.tileDepth`: 20 pixels (per Z unit)
 - `camera.initialZoom`: 1.2
+- `camera.moveSpeed`: 0.5
 - `debug.showDebugInfo`: true
+
+**Best Practices:**
+- ✅ Use `GameConfig.block.defaultHeight` instead of hardcoded `1` or `2`
+- ✅ Use `GameConfig.rendering.tileWidth` instead of hardcoded `64`
+- ✅ Use `this.tileDepth` (loaded from config in constructor) instead of hardcoded `20`
+- ✅ Use `block.properties?.height || GameConfig.block.defaultHeight` for block height fallbacks
+- ❌ Avoid hardcoding dimensions like `const blockHeight = 1`
+- ❌ Avoid hardcoding pixel values like `const depth = 20`
 
 ### Recent Improvements
 
@@ -249,6 +263,8 @@ Key settings in `client/src/engine/config/GameConfig.js`:
 2. **Undo/Redo** - Complete action history with keyboard shortcuts
 3. **Visual Feedback** - Height-based color variation for stacked blocks
 4. **Fixed Rendering** - Corrected isometric coordinate calculations for proper stacking
+5. **Hover Highlighting** - Dual highlighting system: ground-level tile selection + top face of highest block
+6. **GameConfig Integration** - All dimensions and units now properly use centralized configuration
 
 ## Next Steps / TODOs
 

@@ -109,7 +109,11 @@ export class InputManager extends Module {
   handleKeyDown(event) {
     const key = event.code
     
-    if (!this.keys.get(key)) {
+    // For meta key combinations (Cmd/Ctrl + key), always emit the event
+    // This allows repeated undo/redo operations
+    const isMetaCombo = event.metaKey || event.ctrlKey
+    
+    if (!this.keys.get(key) || isMetaCombo) {
       this.keyDownThisFrame.add(key)
       this.engine.eventBus.emit('input:keydown', { key, event })
     }

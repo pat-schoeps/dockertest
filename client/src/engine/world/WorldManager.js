@@ -210,14 +210,25 @@ export class WorldManager extends Module {
    * Get chunk at world position
    * @param {number} worldX - World X position
    * @param {number} worldY - World Y position
+   * @param {boolean} createIfMissing - Whether to create chunk if it doesn't exist
    * @returns {Chunk|null}
    */
-  getChunkAt(worldX, worldY) {
+  getChunkAt(worldX, worldY, createIfMissing = false) {
     const chunkX = Math.floor(worldX / Chunk.SIZE)
     const chunkY = Math.floor(worldY / Chunk.SIZE)
     const chunkId = `${this.worldId}_${chunkX}_${chunkY}`
     
-    return this.chunks.get(chunkId) || null
+    let chunk = this.chunks.get(chunkId)
+    
+    // Auto-create chunk if missing and requested
+    if (!chunk && createIfMissing) {
+      chunk = new Chunk(chunkX, chunkY, this.worldId)
+      this.chunks.set(chunkId, chunk)
+      this.activeChunks.add(chunkId)
+      this.logger.info(`Auto-created chunk: ${chunkId} for world position (${worldX}, ${worldY})`)
+    }
+    
+    return chunk
   }
 
   /**
@@ -267,8 +278,11 @@ export class WorldManager extends Module {
    * @param {Block} block - Block to set
    */
   setBlockAt(worldX, worldY, z, block) {
-    const chunk = this.getChunkAt(worldX, worldY)
-    if (!chunk) return
+    const chunk = this.getChunkAt(worldX, worldY, true) // Auto-create chunk if missing
+    if (!chunk) {
+      this.logger.error(`Failed to create chunk for position (${worldX}, ${worldY})`)
+      return
+    }
     
     const local = chunk.worldToLocal(worldX, worldY)
     chunk.setBlock(local.x, local.y, z, block)

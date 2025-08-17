@@ -49,7 +49,7 @@ export const GameConfig = {
   grid: {
     color: 'rgba(255, 255, 255, 0.05)',  // Grid line color
     lineWidth: 1,                        // Grid line width
-    extent: 10                           // Extra tiles to render beyond screen
+    extent: 50                           // Extra tiles to render beyond screen (increased for large world support)
   },
 
   // Entity Colors (for future use)

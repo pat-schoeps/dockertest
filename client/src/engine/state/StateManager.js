@@ -318,9 +318,12 @@ export class StateManager extends Module {
    * @param {Object} action - Action object with type, data, and undo properties
    */
   recordAction(action) {
+    console.log(`📝 Recording action: ${action.type}, isUndoingOrRedoing=${this.isUndoingOrRedoing}`)
+    
     // Remove any future history if we're not at the end
     if (this.historyIndex < this.history.length - 1) {
       this.history = this.history.slice(0, this.historyIndex + 1)
+      console.log(`✂️ Trimmed future history`)
     }
     
     // Add the action with timestamp
@@ -336,6 +339,7 @@ export class StateManager extends Module {
       this.historyIndex++
     }
     
+    console.log(`✅ Action recorded: historyIndex=${this.historyIndex}, historyLength=${this.history.length}`)
     this.logger.debug(`Recorded action: ${action.type}`, action.data)
   }
 
@@ -343,27 +347,35 @@ export class StateManager extends Module {
    * Undo the last action
    */
   undo() {
+    console.log(`🔄 Undo called: historyIndex=${this.historyIndex}, historyLength=${this.history.length}`)
+    
     if (this.historyIndex < 0 || this.historyIndex >= this.history.length) {
       this.logger.info('Nothing to undo')
+      console.log('❌ Nothing to undo')
       return
     }
     
     const action = this.history[this.historyIndex]
     this.logger.info(`Undoing: ${action.type}`)
+    console.log(`✅ Undoing action: ${action.type} at index ${this.historyIndex}`)
     
     // Set flag to prevent recording undo actions
     this.isUndoingOrRedoing = true
+    console.log(`🚫 Set isUndoingOrRedoing = true`)
     
     try {
       // Execute the undo action
       this.executeUndoAction(action.undo)
       this.historyIndex--
+      console.log(`📉 Decremented historyIndex to ${this.historyIndex}`)
       
       this.engine.eventBus.emit('action:undone', { action })
     } catch (error) {
       this.logger.error('Failed to undo action:', error)
+      console.error('❌ Undo failed:', error)
     } finally {
       this.isUndoingOrRedoing = false
+      console.log(`✅ Set isUndoingOrRedoing = false`)
     }
   }
 
@@ -401,17 +413,22 @@ export class StateManager extends Module {
    * @param {Object} undoAction - The undo action to execute
    */
   executeUndoAction(undoAction) {
+    console.log(`🎯 Executing undo action: ${undoAction.type}`, undoAction.data)
+    
     switch(undoAction.type) {
       case 'block:place':
         // Undo a removal by placing the block back with exact properties
+        console.log(`🟢 Requesting place exact at (${undoAction.data.x}, ${undoAction.data.y}, ${undoAction.data.z})`)
         this.engine.eventBus.emit('tile:requestPlaceExact', undoAction.data)
         break
       case 'block:remove':
         // Undo a placement by removing the block
+        console.log(`🔴 Requesting delete at (${undoAction.data.x}, ${undoAction.data.y}, ${undoAction.data.z})`)
         this.engine.eventBus.emit('tile:requestDelete', undoAction.data)
         break
       default:
         this.logger.warn(`Unknown undo action type: ${undoAction.type}`)
+        console.log(`❓ Unknown undo action type: ${undoAction.type}`)
     }
   }
 

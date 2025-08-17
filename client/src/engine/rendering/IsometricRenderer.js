@@ -173,21 +173,18 @@ export class IsometricRenderer extends Renderer {
    * @param {number} worldY - World Y position
    */
   renderBlock(block, worldX, worldY) {
-    // Get isometric position relative to camera
+    // Get isometric position relative to camera at ground level
     const relX = worldX - this.camera.x
     const relY = worldY - this.camera.y
-    
-    // Calculate base position WITHOUT Z offset
     const baseIso = this.worldToIsometric(relX, relY, 0)
     
-    // Get block height (default to 1 if not specified)
-    const blockHeight = block.properties?.height || 1
+    // Get block height (default from config if not specified)
+    const blockHeight = block.properties?.height || GameConfig.block.defaultHeight
     
-    // Calculate the visual offset for stacking
-    // Each block below this one adds its full height to the offset
+    // Calculate stack offset - each Z level adds blockHeight * tileDepth
     const stackOffset = block.z * blockHeight * this.tileDepth
     
-    // Apply zoom and center on screen, adjusting Y for stacking
+    // Apply zoom and center on screen, moving up by stack offset
     const screenX = baseIso.x * this.camera.zoom + this.width / 2
     const screenY = (baseIso.y - stackOffset) * this.camera.zoom + this.height / 2
     
@@ -596,26 +593,79 @@ export class IsometricRenderer extends Renderer {
   renderHoverHighlight(tile) {
     this.ctx.save()
     
-    // Get position relative to camera
+    // Always show hover outline at ground level (Z=0) to indicate which tile is selected
     const relX = tile.x - this.camera.x
     const relY = tile.y - this.camera.y
     const iso = this.worldToIsometric(relX, relY)
     
-    // Apply zoom and center on screen
+    // Apply zoom and center on screen (no height offset - always at ground level)
     const screenX = iso.x * this.camera.zoom + this.width / 2
     const screenY = iso.y * this.camera.zoom + this.height / 2
     
-    // Set highlight style - much more visible for debugging
+    // Set highlight style - subtle white/gray
     this.ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'
     this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'
-    this.ctx.lineWidth = 3 / this.camera.zoom
+    this.ctx.lineWidth = 2 / this.camera.zoom
     
-    // Draw filled isometric tile
+    // Draw isometric tile outline at ground level
     this.ctx.beginPath()
     this.ctx.moveTo(screenX, screenY)
     this.ctx.lineTo(screenX + this.tileWidth / 2 * this.camera.zoom, screenY + this.tileHeight / 2 * this.camera.zoom)
     this.ctx.lineTo(screenX, screenY + this.tileHeight * this.camera.zoom)
     this.ctx.lineTo(screenX - this.tileWidth / 2 * this.camera.zoom, screenY + this.tileHeight / 2 * this.camera.zoom)
+    this.ctx.closePath()
+    this.ctx.fill()
+    this.ctx.stroke()
+    
+    // Additionally, if there are 2+ blocks at this position, highlight the top of the topmost block
+    const stateManager = this.engine.getModule('StateManager')
+    if (stateManager) {
+      const highestZ = stateManager.getHighestBlockZ(tile.x, tile.y)
+      if (highestZ >= 1) { // Only highlight if there are 2+ blocks (Z >= 1 means at least blocks at Z=0 and Z=1)
+        // Draw a highlight on the top face of the highest block
+        this.highlightTopOfBlock(tile.x, tile.y, highestZ)
+      }
+    }
+    
+    this.ctx.restore()
+  }
+
+  /**
+   * Highlight the top face of a block at the given position
+   * @param {number} worldX - World X coordinate
+   * @param {number} worldY - World Y coordinate  
+   * @param {number} z - Z level of the block
+   */
+  highlightTopOfBlock(worldX, worldY, z) {
+    this.ctx.save()
+    
+    // Use EXACTLY the same positioning logic as renderBlock
+    const relX = worldX - this.camera.x
+    const relY = worldY - this.camera.y
+    const baseIso = this.worldToIsometric(relX, relY, 0)
+    
+    const blockHeight = GameConfig.block.defaultHeight // Use config default height  
+    const stackOffset = z * blockHeight * this.tileDepth // Same as renderBlock
+    
+    // This gives us the block's BASE position (same as renderBlock)
+    const blockBaseX = baseIso.x * this.camera.zoom + this.width / 2
+    const blockBaseY = (baseIso.y - stackOffset) * this.camera.zoom + this.height / 2
+    
+    // The TOP face is drawn at blockBaseY - (blockHeight * tileDepth) * zoom
+    // This matches drawIsometricBox where top = y - depth
+    const topFaceY = blockBaseY - (blockHeight * this.tileDepth * this.camera.zoom)
+    
+    // Set highlight style - subtle for final version
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)' // Subtle white highlight
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)' // White outline
+    this.ctx.lineWidth = 2 / this.camera.zoom
+    
+    // Draw the top face highlight (isometric diamond shape) at the TOP face position
+    this.ctx.beginPath()
+    this.ctx.moveTo(blockBaseX, topFaceY)
+    this.ctx.lineTo(blockBaseX + this.tileWidth / 2 * this.camera.zoom, topFaceY + this.tileHeight / 2 * this.camera.zoom)
+    this.ctx.lineTo(blockBaseX, topFaceY + this.tileHeight * this.camera.zoom)
+    this.ctx.lineTo(blockBaseX - this.tileWidth / 2 * this.camera.zoom, topFaceY + this.tileHeight / 2 * this.camera.zoom)
     this.ctx.closePath()
     this.ctx.fill()
     this.ctx.stroke()
