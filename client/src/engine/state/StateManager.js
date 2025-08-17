@@ -26,10 +26,11 @@ export class StateManager extends Module {
       currentTool: 'select'   // Current tool: 'select', 'place', 'delete'
     }
     
-    // History for undo/redo (future feature)
+    // History for undo/redo
     this.history = []
     this.historyIndex = -1
     this.maxHistory = 50
+    this.isUndoingOrRedoing = false // Prevent recording undo actions during undo/redo
   }
 
   async onInitialize() {
@@ -54,19 +55,57 @@ export class StateManager extends Module {
     })
     
     // Listen for keyboard shortcuts
-    this.engine.eventBus.on('input:keydown', ({ key }) => {
-      this.handleKeyPress(key)
+    this.engine.eventBus.on('input:keydown', ({ key, event }) => {
+      this.handleKeyPress(key, event)
     })
     
     // Listen for block changes from world
     this.engine.eventBus.on('block:added', ({ block, worldX, worldY, z }) => {
       const key = `${worldX},${worldY},${z}`
       this.worldState.blocks.set(key, block)
+      
+      // Record action for undo if not currently undoing/redoing
+      if (!this.isUndoingOrRedoing) {
+        this.recordAction({
+          type: 'block:placed',
+          data: {
+            x: worldX,
+            y: worldY,
+            z: z,
+            block: block.clone() // Store a copy of the block
+          },
+          undo: {
+            type: 'block:remove',
+            data: { x: worldX, y: worldY, z: z }
+          }
+        })
+      }
     })
     
-    this.engine.eventBus.on('block:removed', ({ worldX, worldY, z }) => {
+    this.engine.eventBus.on('block:removed', ({ block, worldX, worldY, z }) => {
       const key = `${worldX},${worldY},${z}`
       this.worldState.blocks.delete(key)
+      
+      // Record action for undo if not currently undoing/redoing
+      if (!this.isUndoingOrRedoing && block) {
+        this.recordAction({
+          type: 'block:removed',
+          data: {
+            x: worldX,
+            y: worldY,
+            z: z
+          },
+          undo: {
+            type: 'block:place',
+            data: {
+              x: worldX,
+              y: worldY,
+              z: z,
+              block: block.clone() // Store a copy of the removed block
+            }
+          }
+        })
+      }
     })
     
     this.logger.info('StateManager initialized')
@@ -126,23 +165,22 @@ export class StateManager extends Module {
     // Update selected tile
     this.uiState.selectedTile = { x: tileX, y: tileY }
     
-    // Check if there's a block at this position
-    const blockKey = `${tileX},${tileY},0`
-    const hasBlock = this.worldState.blocks.has(blockKey)
+    // Find the highest block at this position
+    const highestZ = this.getHighestBlockZ(tileX, tileY)
+    const hasAnyBlock = highestZ >= 0
     
-    // Default behavior: left click places blocks, right click removes them
+    // Default behavior: left click places blocks (stacks if blocks exist), right click removes them
     if (this.uiState.currentTool === 'select') {
-      // In select mode, left click places blocks if no block exists
-      if (!hasBlock) {
-        this.engine.eventBus.emit('tile:requestPlace', { x: tileX, y: tileY, z: 0 })
-      } else {
-        // If block exists, just select it
-        this.engine.eventBus.emit('tile:selected', { x: tileX, y: tileY })
-      }
-    } else if (this.uiState.currentTool === 'place' && !hasBlock) {
-      this.engine.eventBus.emit('tile:requestPlace', { x: tileX, y: tileY, z: 0 })
-    } else if (this.uiState.currentTool === 'delete' && hasBlock) {
-      this.engine.eventBus.emit('tile:requestDelete', { x: tileX, y: tileY, z: 0 })
+      // In select mode, left click always places blocks (stacks on top if blocks exist)
+      const targetZ = hasAnyBlock ? highestZ + 1 : 0
+      this.engine.eventBus.emit('tile:requestPlace', { x: tileX, y: tileY, z: targetZ })
+    } else if (this.uiState.currentTool === 'place') {
+      // Place mode - always stack on top
+      const targetZ = hasAnyBlock ? highestZ + 1 : 0
+      this.engine.eventBus.emit('tile:requestPlace', { x: tileX, y: tileY, z: targetZ })
+    } else if (this.uiState.currentTool === 'delete' && hasAnyBlock) {
+      // Delete mode - remove the topmost block
+      this.engine.eventBus.emit('tile:requestDelete', { x: tileX, y: tileY, z: highestZ })
     } else {
       this.engine.eventBus.emit('tile:selected', { x: tileX, y: tileY })
     }
@@ -155,17 +193,32 @@ export class StateManager extends Module {
     const tileX = Math.floor(worldX)
     const tileY = Math.floor(worldY)
     
-    // Right click to delete block
-    const blockKey = `${tileX},${tileY},0`
-    if (this.worldState.blocks.has(blockKey)) {
-      this.engine.eventBus.emit('tile:requestDelete', { x: tileX, y: tileY, z: 0 })
+    // Right click to delete the topmost block
+    const highestZ = this.getHighestBlockZ(tileX, tileY)
+    if (highestZ >= 0) {
+      this.engine.eventBus.emit('tile:requestDelete', { x: tileX, y: tileY, z: highestZ })
     }
   }
   
   /**
    * Handle keyboard shortcuts
    */
-  handleKeyPress(key) {
+  handleKeyPress(key, event) {
+    // Check for undo/redo shortcuts first
+    if (event && (event.metaKey || event.ctrlKey)) {
+      switch(key) {
+        case 'KeyZ':
+          event.preventDefault()
+          if (event.shiftKey) {
+            this.redo()
+          } else {
+            this.undo()
+          }
+          return
+      }
+    }
+    
+    // Regular tool shortcuts
     switch(key) {
       case 'Digit1':
       case 'KeyS':
@@ -238,6 +291,169 @@ export class StateManager extends Module {
    */
   hasBlockAt(x, y, z = 0) {
     return this.worldState.blocks.has(`${x},${y},${z}`)
+  }
+  
+  /**
+   * Find the highest block Z-coordinate at the given position
+   * @param {number} x - Tile X position
+   * @param {number} y - Tile Y position
+   * @returns {number} Highest Z coordinate, or -1 if no blocks
+   */
+  getHighestBlockZ(x, y) {
+    let highestZ = -1
+    
+    // Search through all blocks to find the highest Z at this X,Y position
+    for (const [key, block] of this.worldState.blocks) {
+      const [blockX, blockY, blockZ] = key.split(',').map(Number)
+      if (blockX === x && blockY === y && blockZ > highestZ) {
+        highestZ = blockZ
+      }
+    }
+    
+    return highestZ
+  }
+
+  /**
+   * Record an action for undo/redo
+   * @param {Object} action - Action object with type, data, and undo properties
+   */
+  recordAction(action) {
+    // Remove any future history if we're not at the end
+    if (this.historyIndex < this.history.length - 1) {
+      this.history = this.history.slice(0, this.historyIndex + 1)
+    }
+    
+    // Add the action with timestamp
+    this.history.push({
+      ...action,
+      timestamp: Date.now()
+    })
+    
+    // Maintain max history size
+    if (this.history.length > this.maxHistory) {
+      this.history.shift()
+    } else {
+      this.historyIndex++
+    }
+    
+    this.logger.debug(`Recorded action: ${action.type}`, action.data)
+  }
+
+  /**
+   * Undo the last action
+   */
+  undo() {
+    if (this.historyIndex < 0 || this.historyIndex >= this.history.length) {
+      this.logger.info('Nothing to undo')
+      return
+    }
+    
+    const action = this.history[this.historyIndex]
+    this.logger.info(`Undoing: ${action.type}`)
+    
+    // Set flag to prevent recording undo actions
+    this.isUndoingOrRedoing = true
+    
+    try {
+      // Execute the undo action
+      this.executeUndoAction(action.undo)
+      this.historyIndex--
+      
+      this.engine.eventBus.emit('action:undone', { action })
+    } catch (error) {
+      this.logger.error('Failed to undo action:', error)
+    } finally {
+      this.isUndoingOrRedoing = false
+    }
+  }
+
+  /**
+   * Redo the next action
+   */
+  redo() {
+    if (this.historyIndex >= this.history.length - 1) {
+      this.logger.info('Nothing to redo')
+      return
+    }
+    
+    this.historyIndex++
+    const action = this.history[this.historyIndex]
+    this.logger.info(`Redoing: ${action.type}`)
+    
+    // Set flag to prevent recording redo actions
+    this.isUndoingOrRedoing = true
+    
+    try {
+      // Execute the original action again
+      this.executeRedoAction(action)
+      
+      this.engine.eventBus.emit('action:redone', { action })
+    } catch (error) {
+      this.logger.error('Failed to redo action:', error)
+      this.historyIndex-- // Revert index on error
+    } finally {
+      this.isUndoingOrRedoing = false
+    }
+  }
+
+  /**
+   * Execute an undo action
+   * @param {Object} undoAction - The undo action to execute
+   */
+  executeUndoAction(undoAction) {
+    switch(undoAction.type) {
+      case 'block:place':
+        // Undo a removal by placing the block back with exact properties
+        this.engine.eventBus.emit('tile:requestPlaceExact', undoAction.data)
+        break
+      case 'block:remove':
+        // Undo a placement by removing the block
+        this.engine.eventBus.emit('tile:requestDelete', undoAction.data)
+        break
+      default:
+        this.logger.warn(`Unknown undo action type: ${undoAction.type}`)
+    }
+  }
+
+  /**
+   * Execute a redo action
+   * @param {Object} action - The original action to execute again
+   */
+  executeRedoAction(action) {
+    switch(action.type) {
+      case 'block:placed':
+        // Redo a placement with exact properties
+        this.engine.eventBus.emit('tile:requestPlaceExact', action.data)
+        break
+      case 'block:removed':
+        // Redo a removal
+        this.engine.eventBus.emit('tile:requestDelete', action.data)
+        break
+      default:
+        this.logger.warn(`Unknown redo action type: ${action.type}`)
+    }
+  }
+
+  /**
+   * Clear all undo/redo history
+   */
+  clearHistory() {
+    this.history = []
+    this.historyIndex = -1
+    this.logger.info('Undo/redo history cleared')
+  }
+
+  /**
+   * Get undo/redo state for UI
+   * @returns {Object} State object with canUndo and canRedo flags
+   */
+  getUndoRedoState() {
+    return {
+      canUndo: this.historyIndex >= 0,
+      canRedo: this.historyIndex < this.history.length - 1,
+      historyLength: this.history.length,
+      currentIndex: this.historyIndex
+    }
   }
   
   onUpdate(deltaTime) {

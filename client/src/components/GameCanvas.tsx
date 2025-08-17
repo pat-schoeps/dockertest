@@ -16,7 +16,8 @@ export const GameCanvas = () => {
     chunks: 0,
     entities: 0,
     camera: { x: 0, y: 0 },
-    zoom: 1
+    zoom: 1,
+    undoState: { canUndo: false, canRedo: false, historyLength: 0 }
   })
 
   useEffect(() => {
@@ -158,13 +159,17 @@ export const GameCanvas = () => {
           
           renderer.renderWorld(chunks)
           
-          // Update debug info
+          // Update debug info including undo state
+          const stateManager = engine.getModule('StateManager')
+          const undoState = stateManager ? stateManager.getUndoRedoState() : { canUndo: false, canRedo: false, historyLength: 0 }
+          
           setDebugInfo({
             chunks: chunks.size,
             entities: Array.from(chunks.values()).reduce((sum, chunk) => 
               sum + chunk.getEntities().length, 0),
             camera: { x: cameraX, y: cameraY },
-            zoom: cameraZoom
+            zoom: cameraZoom,
+            undoState
           })
         })
 
@@ -251,6 +256,8 @@ export const GameCanvas = () => {
         <div>Entities: {debugInfo.entities}</div>
         <div>Camera: ({debugInfo.camera.x.toFixed(1)}, {debugInfo.camera.y.toFixed(1)})</div>
         <div>Zoom: {debugInfo.zoom.toFixed(2)}x</div>
+        <div>History: {debugInfo.undoState.historyLength} actions</div>
+        <div>Undo: {debugInfo.undoState.canUndo ? '✓' : '✗'} | Redo: {debugInfo.undoState.canRedo ? '✓' : '✗'}</div>
       </div>}
       
       {/* Controls help */}
@@ -273,7 +280,9 @@ export const GameCanvas = () => {
         <div>G - Toggle grid</div>
         <div>B - Toggle chunk borders</div>
         <div>H - Toggle debug info</div>
-        <div>Click - Interact with entities</div>
+        <div>Click - Place/stack blocks</div>
+        <div>Right click - Remove top block</div>
+        <div>Cmd+Z - Undo | Cmd+Shift+Z - Redo</div>
       </div>}
     </div>
   )

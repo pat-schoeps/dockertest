@@ -45,6 +45,11 @@ export class WorldManager extends Module {
       this.placeBlock(x, y, z)
     })
     
+    // Listen for exact block placement requests (for undo/redo)
+    this.engine.eventBus.on('tile:requestPlaceExact', ({ x, y, z, block }) => {
+      this.placeBlockExact(x, y, z, block)
+    })
+    
     // Listen for block removal requests from state manager
     this.engine.eventBus.on('tile:requestDelete', ({ x, y, z }) => {
       this.removeBlock(x, y, z)
@@ -231,6 +236,30 @@ export class WorldManager extends Module {
   }
 
   /**
+   * Find the highest block Z-coordinate at the given world position
+   * @param {number} worldX - World X position
+   * @param {number} worldY - World Y position
+   * @returns {number} Highest Z coordinate, or -1 if no blocks
+   */
+  getHighestBlockZ(worldX, worldY) {
+    const chunk = this.getChunkAt(worldX, worldY)
+    if (!chunk) return -1
+    
+    const local = chunk.worldToLocal(worldX, worldY)
+    let highestZ = -1
+    
+    // Search through all blocks in the chunk to find the highest Z at this position
+    for (const [key, block] of chunk.blocks) {
+      const [blockX, blockY, blockZ] = key.split(',').map(Number)
+      if (blockX === local.x && blockY === local.y && blockZ > highestZ) {
+        highestZ = blockZ
+      }
+    }
+    
+    return highestZ
+  }
+
+  /**
    * Set block at world position
    * @param {number} worldX - World X position
    * @param {number} worldY - World Y position
@@ -267,8 +296,25 @@ export class WorldManager extends Module {
     }
     
     // Create a new block with default properties
+    // Slightly vary the color based on height to make stacking more visible
+    let blockColor = GameConfig.block.defaultColor
+    if (z > 0) {
+      // Lighten the color slightly for each level up
+      const lightenFactor = Math.min(0.1 + (z * 0.05), 0.3)
+      const hex = blockColor.replace('#', '')
+      const r = parseInt(hex.substr(0, 2), 16)
+      const g = parseInt(hex.substr(2, 2), 16)
+      const b = parseInt(hex.substr(4, 2), 16)
+      
+      const newR = Math.min(255, Math.floor(r + (255 - r) * lightenFactor))
+      const newG = Math.min(255, Math.floor(g + (255 - g) * lightenFactor))
+      const newB = Math.min(255, Math.floor(b + (255 - b) * lightenFactor))
+      
+      blockColor = `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`
+    }
+    
     const block = new Block(x, y, z, GameConfig.block.defaultType, {
-      color: GameConfig.block.defaultColor,
+      color: blockColor,
       height: GameConfig.block.defaultHeight
     })
     
@@ -284,6 +330,40 @@ export class WorldManager extends Module {
     })
     
     this.logger.info(`Placed block at (${x}, ${y}, ${z})`)
+  }
+
+  /**
+   * Place an exact block at the specified position (for undo/redo)
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   * @param {number} z - Z layer
+   * @param {Block} block - Exact block to place
+   */
+  placeBlockExact(x, y, z, block) {
+    // Check if block already exists at this position
+    if (this.getBlockAt(x, y, z)) {
+      this.logger.warn(`Block already exists at (${x}, ${y}, ${z}) for exact placement`)
+      return
+    }
+    
+    // Create a new block with exact properties from the provided block
+    const newBlock = block.clone()
+    newBlock.x = x  // Ensure correct position
+    newBlock.y = y
+    newBlock.z = z
+    
+    // Place the block
+    this.setBlockAt(x, y, z, newBlock)
+    
+    // Emit block added event for state management
+    this.engine.eventBus.emit('block:added', {
+      block: newBlock,
+      worldX: x,
+      worldY: y,
+      z
+    })
+    
+    this.logger.info(`Placed exact block at (${x}, ${y}, ${z})`)
   }
 
   /**

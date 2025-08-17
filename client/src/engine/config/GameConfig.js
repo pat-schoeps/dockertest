@@ -7,7 +7,7 @@ export const GameConfig = {
   // Block/Tile Configuration
   block: {
     defaultColor: '#00ff88',     // Green color for the default block
-    defaultHeight: 1.75,           // Height of the 3D block (adjust this to make blocks taller/shorter)
+    defaultHeight: 2.0,           // Height of the 3D block (reduced from 1.75 for better proportions)
     defaultType: 'grass'
   },
 

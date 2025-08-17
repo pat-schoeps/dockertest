@@ -7,6 +7,7 @@ This document provides context for Claude Code sessions about the monorepo struc
 This is a **monorepo** containing:
 - **Rails API** (`/api/`) - Ruby on Rails 8.0.2 in API mode with PostgreSQL
 - **React Client** (`/client/`) - React 19 with Vite, TypeScript, Redux Toolkit, Mantine UI
+- **Game Engine** (`/client/src/engine/`) - Custom isometric 3D game engine with block-based building
 - **Docker Setup** - Complete containerization with docker-compose
 
 ## Authentication System
@@ -163,11 +164,91 @@ docker compose exec api rails console  # Rails console in container
 - Redux Toolkit + RTK Query
 - Mantine UI component library
 - React Router v7
+- Custom Game Engine (JavaScript ES6 modules)
 
 **DevOps:**
 - Docker + Docker Compose
 - Development and production Dockerfiles
 - Volume mounting for hot reload
+
+## Game Engine
+
+### Architecture
+The client includes a custom-built isometric 3D game engine with modular architecture:
+
+**Core Modules:**
+- `Engine.js` - Main game loop with 60 FPS fixed timestep physics
+- `EventBus.js` - Event-driven communication between modules
+- `Module.js` - Base class for all engine modules
+
+**Key Systems:**
+- `IsometricRenderer.js` - 3D isometric rendering with depth sorting
+- `WorldManager.js` - Chunk-based world management and block placement
+- `StateManager.js` - Game state, UI state, and undo/redo history
+- `InputManager.js` - Keyboard and mouse input handling
+- `AssetManager.js` - Resource loading and management
+
+### Game Features
+
+**Block Building System:**
+- **3D Block Stacking** - Click to place blocks, click again to stack on top
+- **Block Types** - Multiple block types (grass, stone, water, sand, etc.)
+- **Visual Height Variation** - Stacked blocks get progressively lighter colors
+- **Block Properties** - Each block has customizable height (default: 2.0)
+
+**Controls:**
+- **WASD/Arrows** - Move camera around the world
+- **Q/E** - Zoom in/out
+- **Mouse Wheel** - Zoom control
+- **Left Click** - Place/stack blocks
+- **Right Click** - Remove topmost block
+- **Cmd+Z** - Undo last action
+- **Cmd+Shift+Z** - Redo action
+- **G** - Toggle grid overlay
+- **B** - Toggle chunk borders
+- **H** - Toggle debug info
+
+**Undo/Redo System:**
+- Tracks up to 50 actions in history
+- Records block placement and removal
+- Preserves exact block properties when undoing/redoing
+- Keyboard shortcuts: Cmd+Z (undo), Cmd+Shift+Z (redo)
+
+### Technical Details
+
+**Rendering System:**
+- Isometric projection with proper depth sorting
+- Camera with zoom and pan controls
+- Grid overlay for tile visualization
+- Debug overlay showing FPS, chunks, entities, history
+
+**World System:**
+- Chunk-based world (16x16 blocks per chunk)
+- Dynamic chunk loading/unloading
+- Support for multiple Z-layers (height)
+- Entity management system
+
+**Coordinate System:**
+- World coordinates: X, Y, Z (Z is vertical)
+- Isometric screen projection
+- Proper stacking visualization with height offsets
+
+### Configuration
+
+Key settings in `client/src/engine/config/GameConfig.js`:
+- `block.defaultHeight`: 2.0 (height of each block)
+- `rendering.tileWidth`: 64 pixels
+- `rendering.tileHeight`: 32 pixels  
+- `rendering.tileDepth`: 20 pixels (per Z unit)
+- `camera.initialZoom`: 1.2
+- `debug.showDebugInfo`: true
+
+### Recent Improvements
+
+1. **Block Stacking** - Implemented proper 3D stacking with visual height representation
+2. **Undo/Redo** - Complete action history with keyboard shortcuts
+3. **Visual Feedback** - Height-based color variation for stacked blocks
+4. **Fixed Rendering** - Corrected isometric coordinate calculations for proper stacking
 
 ## Next Steps / TODOs
 
@@ -178,3 +259,8 @@ docker compose exec api rails console  # Rails console in container
 - [ ] Implement refresh token rotation
 - [ ] Add API rate limiting
 - [ ] Set up CI/CD pipeline
+- [ ] Add multiplayer support via Rails WebSockets
+- [ ] Implement world persistence to database
+- [ ] Add more block types and textures
+- [ ] Create block selection UI
+- [ ] Add sound effects for block placement/removal

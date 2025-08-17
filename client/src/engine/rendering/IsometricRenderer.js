@@ -176,19 +176,25 @@ export class IsometricRenderer extends Renderer {
     // Get isometric position relative to camera
     const relX = worldX - this.camera.x
     const relY = worldY - this.camera.y
-    const iso = this.worldToIsometric(relX, relY, block.z)
     
-    // Apply zoom and center on screen
-    const screenX = iso.x * this.camera.zoom + this.width / 2
-    const screenY = iso.y * this.camera.zoom + this.height / 2
+    // Calculate base position WITHOUT Z offset
+    const baseIso = this.worldToIsometric(relX, relY, 0)
+    
+    // Get block height (default to 1 if not specified)
+    const blockHeight = block.properties?.height || 1
+    
+    // Calculate the visual offset for stacking
+    // Each block below this one adds its full height to the offset
+    const stackOffset = block.z * blockHeight * this.tileDepth
+    
+    // Apply zoom and center on screen, adjusting Y for stacking
+    const screenX = baseIso.x * this.camera.zoom + this.width / 2
+    const screenY = (baseIso.y - stackOffset) * this.camera.zoom + this.height / 2
     
     // Save context for scaling
     this.ctx.save()
     this.ctx.translate(screenX, screenY)
     this.ctx.scale(this.camera.zoom, this.camera.zoom)
-    
-    // Get block height (default to 1 if not specified)
-    const blockHeight = block.properties?.height || 1
     
     // Draw block as 3D isometric cube
     this.drawIsometricBox(
@@ -196,7 +202,7 @@ export class IsometricRenderer extends Renderer {
       0,
       this.tileWidth,
       this.tileHeight,
-      blockHeight * this.tileDepth, // Convert height to pixels (reduced by half)
+      blockHeight * this.tileDepth,
       block.color
     )
     
