@@ -2,6 +2,7 @@ import { Module } from '../core/Module.js'
 import { Logger } from '../utils/Logger.js'
 import { Chunk } from './Chunk.js'
 import { Block } from './Block.js'
+import { Tile } from './Tile.js'
 import { Entity } from './Entity.js'
 import { GameConfig } from '../config/GameConfig.js'
 
@@ -53,6 +54,11 @@ export class WorldManager extends Module {
     // Listen for block removal requests from state manager
     this.engine.eventBus.on('tile:requestDelete', ({ x, y, z }) => {
       this.removeBlock(x, y, z)
+    })
+    
+    // Listen for 2D tile placement requests
+    this.engine.eventBus.on('tile:request2DPlace', ({ x, y }) => {
+      this.place2DTile(x, y)
     })
     
     this.logger.info('World manager initialized')
@@ -378,6 +384,58 @@ export class WorldManager extends Module {
     })
     
     this.logger.info(`Placed exact block at (${x}, ${y}, ${z})`)
+  }
+
+  /**
+   * Place a 2D tile at the specified position (only one per grid position)
+   * @param {number} x - World X position
+   * @param {number} y - World Y position
+   */
+  place2DTile(x, y) {
+    // Check if a 2D tile already exists at this position
+    if (this.get2DTileAt(x, y)) {
+      this.logger.warn(`2D tile already exists at (${x}, ${y})`)
+      return
+    }
+    
+    // Create a new 2D tile with water/river texture
+    const tile = new Tile(x, y, 'water', {
+      color: '#00ccff', // Use the water blue from the palette
+      walkable: true
+    })
+    
+    // Store the tile in the chunk
+    const chunk = this.getChunkAt(x, y, true)
+    if (!chunk) {
+      this.logger.error(`Failed to create chunk for 2D tile at position (${x}, ${y})`)
+      return
+    }
+    
+    const local = chunk.worldToLocal(x, y)
+    chunk.set2DTile(local.x, local.y, tile)
+    
+    // Emit tile added event for state management
+    this.engine.eventBus.emit('tile:added', {
+      tile,
+      worldX: x,
+      worldY: y
+    })
+    
+    this.logger.info(`Placed 2D tile at (${x}, ${y})`)
+  }
+
+  /**
+   * Get 2D tile at world position
+   * @param {number} worldX - World X position
+   * @param {number} worldY - World Y position
+   * @returns {Tile|null}
+   */
+  get2DTileAt(worldX, worldY) {
+    const chunk = this.getChunkAt(worldX, worldY)
+    if (!chunk) return null
+    
+    const local = chunk.worldToLocal(worldX, worldY)
+    return chunk.get2DTile(local.x, local.y)
   }
 
   /**

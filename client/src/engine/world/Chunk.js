@@ -20,6 +20,7 @@ export class Chunk {
     
     // Chunk data
     this.blocks = new Map() // Key: "x,y,z" -> Block
+    this.tiles = new Map() // Key: "x,y" -> Tile (2D ground tiles)
     this.entities = new Map() // Key: entity.id -> Entity
     
     // Metadata
@@ -82,6 +83,47 @@ export class Chunk {
     if (markAsDirty) {
       this.markDirty()
     }
+  }
+
+  /**
+   * Get 2D tile at position
+   * @param {number} x - Local X position (0-15)
+   * @param {number} y - Local Y position (0-15)
+   * @returns {Tile|null}
+   */
+  get2DTile(x, y) {
+    const key = `${x},${y}`
+    return this.tiles.get(key) || null
+  }
+
+  /**
+   * Set 2D tile at position
+   * @param {number} x - Local X position (0-15)
+   * @param {number} y - Local Y position (0-15)
+   * @param {Tile} tile - Tile to set
+   */
+  set2DTile(x, y, tile) {
+    if (x < 0 || x >= Chunk.SIZE || y < 0 || y >= Chunk.SIZE) {
+      throw new Error(`Invalid tile position: (${x}, ${y})`)
+    }
+
+    const key = `${x},${y}`
+    this.tiles.set(key, tile)
+    this.markDirty()
+  }
+
+  /**
+   * Remove 2D tile at position
+   * @param {number} x - Local X position (0-15)
+   * @param {number} y - Local Y position (0-15)
+   */
+  remove2DTile(x, y) {
+    const key = `${x},${y}`
+    const removed = this.tiles.delete(key)
+    if (removed) {
+      this.markDirty()
+    }
+    return removed
   }
 
   /**

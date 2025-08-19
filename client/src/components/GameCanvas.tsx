@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { SegmentedControl, Paper, Text } from '@mantine/core'
 import { GameEngine } from '../engine/core/Engine.js'
 import { AssetManager } from '../engine/assets/AssetManager.js'
 import { InputManager } from '../engine/input/InputManager.js'
@@ -12,6 +13,7 @@ export const GameCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const engineRef = useRef<GameEngine | null>(null)
   const [fps, setFPS] = useState(0)
+  const [placementMode, setPlacementMode] = useState<'3d-block' | '2d-tile'>('3d-block')
   const [debugInfo, setDebugInfo] = useState({
     chunks: 0,
     entities: 0,
@@ -221,6 +223,13 @@ export const GameCanvas = () => {
     }
   }, [])
 
+  // Emit placement mode changes to the game engine
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.eventBus.emit('placement:modeChanged', { mode: placementMode })
+    }
+  }, [placementMode])
+
   return (
     <div style={{ 
       position: 'relative',
@@ -284,6 +293,57 @@ export const GameCanvas = () => {
         <div>Right click - Remove top block</div>
         <div>Cmd+Z - Undo | Cmd+Shift+Z - Redo</div>
       </div>}
+
+      {/* Placement Mode UI */}
+      <Paper
+        shadow="lg"
+        p="md"
+        style={{
+          position: 'absolute',
+          bottom: 20,
+          right: 20,
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          border: '1px solid #00ff88',
+          minWidth: '200px'
+        }}
+      >
+        <Text size="sm" style={{ color: '#00ff88', marginBottom: 10, fontFamily: 'monospace' }}>
+          Placement Mode
+        </Text>
+        <SegmentedControl
+          value={placementMode}
+          onChange={(value) => setPlacementMode(value as '3d-block' | '2d-tile')}
+          data={[
+            { label: '3D Block', value: '3d-block' },
+            { label: '2D Tile', value: '2d-tile' }
+          ]}
+          styles={{
+            root: {
+              backgroundColor: 'transparent',
+            },
+            control: {
+              backgroundColor: 'rgba(0, 255, 136, 0.2)',
+              color: '#00ff88',
+              border: '1px solid #00ff88',
+              '&:hover': {
+                backgroundColor: 'rgba(0, 255, 136, 0.3)',
+              }
+            },
+            controlActive: {
+              backgroundColor: '#00ff88',
+              color: '#000',
+              '&:hover': {
+                backgroundColor: '#00ff88',
+              }
+            }
+          }}
+        />
+        <Text size="xs" style={{ color: '#00ccff', marginTop: 10, fontFamily: 'monospace' }}>
+          {placementMode === '3d-block' 
+            ? 'Place stackable 3D blocks' 
+            : 'Place 2D tiles (water/texture)'}
+        </Text>
+      </Paper>
     </div>
   )
 }

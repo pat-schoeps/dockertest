@@ -42,6 +42,21 @@ export class IsometricRenderer extends Renderer {
     const renderables = []
     
     for (const chunk of visibleChunks) {
+      // Add 2D tiles (render first, at ground level)
+      for (const tile of chunk.tiles.values()) {
+        if (tile.visible) {
+          const worldPos = chunk.localToWorld(tile.x, tile.y)
+          renderables.push({
+            type: 'tile',
+            object: tile,
+            worldX: worldPos.x,
+            worldY: worldPos.y,
+            z: -0.1, // Render slightly below ground level to show under blocks
+            chunk: chunk
+          })
+        }
+      }
+      
       // Add blocks
       for (const block of chunk.blocks.values()) {
         if (block.visible) {
@@ -84,7 +99,9 @@ export class IsometricRenderer extends Renderer {
     
     // Render all objects
     for (const renderable of renderables) {
-      if (renderable.type === 'block') {
+      if (renderable.type === 'tile') {
+        this.render2DTile(renderable.object, renderable.worldX, renderable.worldY)
+      } else if (renderable.type === 'block') {
         this.renderBlock(renderable.object, renderable.worldX, renderable.worldY)
       } else if (renderable.type === 'entity') {
         this.renderEntity(renderable.object)
@@ -164,6 +181,42 @@ export class IsometricRenderer extends Renderer {
       x: world.x + this.camera.x,
       y: world.y + this.camera.y
     }
+  }
+
+  /**
+   * Render a 2D tile
+   * @param {Tile} tile - Tile to render
+   * @param {number} worldX - World X position
+   * @param {number} worldY - World Y position
+   */
+  render2DTile(tile, worldX, worldY) {
+    // Get isometric position relative to camera at ground level
+    const relX = worldX - this.camera.x
+    const relY = worldY - this.camera.y
+    const iso = this.worldToIsometric(relX, relY, 0)
+    
+    // Apply zoom and center on screen
+    const screenX = iso.x * this.camera.zoom + this.width / 2
+    const screenY = iso.y * this.camera.zoom + this.height / 2
+    
+    // Save context for scaling
+    this.ctx.save()
+    this.ctx.translate(screenX, screenY)
+    this.ctx.scale(this.camera.zoom, this.camera.zoom)
+    
+    // Render 2D tile as a flat isometric diamond with texture/pattern
+    this.drawIsometricTile(
+      0,
+      0,
+      this.tileWidth,
+      this.tileHeight,
+      tile.color,
+      2 // Small depth for visual interest
+    )
+    
+    this.ctx.restore()
+    
+    this.renderStats.drawCalls++
   }
 
   /**

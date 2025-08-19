@@ -12,6 +12,7 @@ export class StateManager extends Module {
     // World state - persisted data
     this.worldState = {
       blocks: new Map(),      // All blocks in the world
+      tiles: new Map(),       // All 2D tiles in the world (ground textures)
       entities: new Map(),    // All entities in the world
       chunks: new Map()       // Chunk metadata
     }
@@ -23,7 +24,8 @@ export class StateManager extends Module {
       mouseWorldPos: null,    // Mouse position in world coordinates {x, y}
       isPlacingBlock: false,  // Whether in block placement mode
       isDeletingBlock: false, // Whether in block deletion mode
-      currentTool: 'select'   // Current tool: 'select', 'place', 'delete'
+      currentTool: 'select',  // Current tool: 'select', 'place', 'delete'
+      placementMode: '3d-block' // Placement mode: '3d-block' or '2d-tile'
     }
     
     // History for undo/redo
@@ -34,6 +36,12 @@ export class StateManager extends Module {
   }
 
   async onInitialize() {
+    // Listen for placement mode changes from React UI
+    this.engine.eventBus.on('placement:modeChanged', ({ mode }) => {
+      this.uiState.placementMode = mode
+      this.logger.info(`Placement mode changed to: ${mode}`)
+    })
+    
     // Listen for mouse movement events
     this.engine.eventBus.on('input:mousemove', ({ worldX, worldY, screenX, screenY }) => {
       this.updateMousePosition(worldX, worldY)
@@ -108,6 +116,28 @@ export class StateManager extends Module {
       }
     })
     
+    // Listen for 2D tile changes from world
+    this.engine.eventBus.on('tile:added', ({ tile, worldX, worldY }) => {
+      const key = `${worldX},${worldY}`
+      this.worldState.tiles.set(key, tile)
+      
+      // Record action for undo if not currently undoing/redoing
+      if (!this.isUndoingOrRedoing) {
+        this.recordAction({
+          type: 'tile:placed',
+          data: {
+            x: worldX,
+            y: worldY,
+            tile: tile.clone() // Store a copy of the tile
+          },
+          undo: {
+            type: 'tile:remove',
+            data: { x: worldX, y: worldY }
+          }
+        })
+      }
+    })
+    
     this.logger.info('StateManager initialized')
   }
   
@@ -165,24 +195,30 @@ export class StateManager extends Module {
     // Update selected tile
     this.uiState.selectedTile = { x: tileX, y: tileY }
     
-    // Find the highest block at this position
-    const highestZ = this.getHighestBlockZ(tileX, tileY)
-    const hasAnyBlock = highestZ >= 0
-    
-    // Default behavior: left click places blocks (stacks if blocks exist), right click removes them
-    if (this.uiState.currentTool === 'select') {
-      // In select mode, left click always places blocks (stacks on top if blocks exist)
-      const targetZ = hasAnyBlock ? highestZ + 1 : 0
-      this.engine.eventBus.emit('tile:requestPlace', { x: tileX, y: tileY, z: targetZ })
-    } else if (this.uiState.currentTool === 'place') {
-      // Place mode - always stack on top
-      const targetZ = hasAnyBlock ? highestZ + 1 : 0
-      this.engine.eventBus.emit('tile:requestPlace', { x: tileX, y: tileY, z: targetZ })
-    } else if (this.uiState.currentTool === 'delete' && hasAnyBlock) {
-      // Delete mode - remove the topmost block
-      this.engine.eventBus.emit('tile:requestDelete', { x: tileX, y: tileY, z: highestZ })
+    // Check placement mode
+    if (this.uiState.placementMode === '2d-tile') {
+      // Place a 2D tile at ground level (only one per position)
+      this.engine.eventBus.emit('tile:request2DPlace', { x: tileX, y: tileY })
     } else {
-      this.engine.eventBus.emit('tile:selected', { x: tileX, y: tileY })
+      // 3D block placement logic
+      const highestZ = this.getHighestBlockZ(tileX, tileY)
+      const hasAnyBlock = highestZ >= 0
+      
+      // Default behavior: left click places blocks (stacks if blocks exist), right click removes them
+      if (this.uiState.currentTool === 'select') {
+        // In select mode, left click always places blocks (stacks on top if blocks exist)
+        const targetZ = hasAnyBlock ? highestZ + 1 : 0
+        this.engine.eventBus.emit('tile:requestPlace', { x: tileX, y: tileY, z: targetZ })
+      } else if (this.uiState.currentTool === 'place') {
+        // Place mode - always stack on top
+        const targetZ = hasAnyBlock ? highestZ + 1 : 0
+        this.engine.eventBus.emit('tile:requestPlace', { x: tileX, y: tileY, z: targetZ })
+      } else if (this.uiState.currentTool === 'delete' && hasAnyBlock) {
+        // Delete mode - remove the topmost block
+        this.engine.eventBus.emit('tile:requestDelete', { x: tileX, y: tileY, z: highestZ })
+      } else {
+        this.engine.eventBus.emit('tile:selected', { x: tileX, y: tileY })
+      }
     }
   }
   
@@ -425,6 +461,16 @@ export class StateManager extends Module {
         // Undo a placement by removing the block
         console.log(`🔴 Requesting delete at (${undoAction.data.x}, ${undoAction.data.y}, ${undoAction.data.z})`)
         this.engine.eventBus.emit('tile:requestDelete', undoAction.data)
+        break
+      case 'tile:place':
+        // Undo a tile removal by placing the tile back
+        console.log(`🟦 Requesting 2D tile place at (${undoAction.data.x}, ${undoAction.data.y})`)
+        this.engine.eventBus.emit('tile:request2DPlaceExact', undoAction.data)
+        break
+      case 'tile:remove':
+        // Undo a tile placement by removing the tile
+        console.log(`🟦 Requesting 2D tile remove at (${undoAction.data.x}, ${undoAction.data.y})`)
+        this.engine.eventBus.emit('tile:request2DRemove', undoAction.data)
         break
       default:
         this.logger.warn(`Unknown undo action type: ${undoAction.type}`)
